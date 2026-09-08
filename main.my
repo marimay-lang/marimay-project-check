@@ -1,0 +1,190 @@
+import * as bytes from "std/bytes";
+import * as cli from "std/cli";
+import * as fs from "std/fs";
+import * as json from "std/json";
+import * as path from "std/path";
+import * as text from "std/text";
+
+import * as config from "local/marimay-project-check/config";
+import * as tree from "local/marimay-project-check/tree";
+
+type Finding {
+  public path: string,
+  public code: string,
+  public message: string,
+}
+
+type Report {
+  public project: string,
+  public ok: bool,
+  public findings: []Finding,
+}
+
+fn extensionAllowed(name: string, extensions: []string): bool {
+  if extensions.length() == 0 {
+    return true;
+  }
+  for extension in extensions {
+    if text.endsWith(name, extension) {
+      return true;
+    }
+  }
+  return false;
+}
+
+fn inspect(configuration: config.Configuration, scanned: tree.Scan): Result<Report, string> {
+  const findings: []Finding = [];
+  const known = mapOf<string, tree.Entry>();
+  for issue in scanned.issues {
+    findings.push(Finding { path: issue.path, code: "read", message: issue.message }).mapError(
+      (error) => "Слишком много замечаний",
+    )?;
+  }
+  for entry in scanned.entries {
+    const _ = known.put(entry.path, entry).mapError((error) => "Слишком много файлов")?;
+    if entry.kind == "file" {
+      if !extensionAllowed(entry.path, configuration.scan.extensions) {
+        findings.push(
+          Finding { path: entry.path, code: "extension", message: "Расширение не разрешено" },
+        ).mapError((error) => "Слишком много замечаний")?;
+      }
+      if entry.size > configuration.scan.maxFileBytes {
+        findings.push(
+          Finding {
+            path: entry.path,
+            code: "size",
+            message: $"Размер {entry.size} превышает {configuration.scan.maxFileBytes} байт",
+          },
+        ).mapError((error) => "Слишком много замечаний")?;
+      }
+    } else if entry.kind != "directory" {
+      findings.push(
+        Finding {
+          path: entry.path,
+          code: "kind",
+          message: $"Недопустимый тип записи: {entry.kind}",
+        },
+      ).mapError((error) => "Слишком много замечаний")?;
+    }
+  }
+  for required in configuration.scan.requiredFiles {
+    const _ = tree.relative(required).mapError((error) => $"requiredFiles: {required}: {error}")?;
+    if const entry = known.get(required) {
+      if entry.kind != "file" {
+        findings.push(
+          Finding {
+            path: required,
+            code: "required-kind",
+            message: "Обязательная запись должна быть обычным файлом",
+          },
+        ).mapError((error) => "Слишком много замечаний")?;
+      }
+    } else {
+      const code = match scanned.issues.length() == 0 {
+        true => "missing",
+        false => "unverified",
+      };
+      const message = match scanned.issues.length() == 0 {
+        true => "Обязательный файл отсутствует",
+        false => "Наличие файла не подтверждено: обход неполон",
+      };
+      findings.push(Finding { path: required, code, message }).mapError(
+        (error) => "Слишком много замечаний",
+      )?;
+    }
+  }
+  return Ok(Report { project: configuration.project.name, ok: findings.length() == 0, findings });
+}
+
+fn execute(parsed: cli.Parsed, file: string): Result<int, string> {
+  const limit = number(parsed, "max-entries", 10000, 65536)?;
+  const depth = number(parsed, "max-depth", 64, 256)?;
+  const input = path.fromString(file).mapError((error) => "Недопустимый путь конфигурации")?;
+  const configuration = config.decode(
+    fs.readBytes(input, 1048576).mapError(fs.message)?,
+    json.defaultLimits(),
+  ).mapError(config.message)?;
+  // Configuration roots are resolved against the invoking working directory.
+  const root = path.fromString(configuration.project.root).mapError(
+    (error) => "Недопустимый корень",
+  )?;
+  const scanned = tree.walk(root, limit, depth)?;
+  const report = inspect(configuration, scanned)?;
+  if cli.count(parsed, "json") != 0 {
+    emit(
+      bytes.decodeUtf8(json.encode(report).mapError(json.message)?).mapError(
+        (error) => "Некорректный UTF-8 отчёта",
+      )?,
+    )?;
+  } else {
+    for finding in report.findings {
+      emit($"{finding.path}: {finding.code}: {finding.message}")?;
+    }
+    if report.ok {
+      emit($"{report.project}: OK")?;
+    }
+  }
+  flush()?;
+  return Ok(
+    match report.ok {
+      true => 0,
+      false => 1,
+    },
+  );
+}
+
+fn main(arguments: []string): int {
+  const parser = match cli.newParser(
+    "marimay-project-check",
+    "Проверить дерево по конфигу marimay-config v1/v2; собрать замечания.",
+    [
+      cli.flagOption("help", Some("h"), false, false, "Показать справку"),
+      cli.flagOption("json", None, false, false, "Структурированный отчёт"),
+      cli.requiredValueOption(
+        "max-entries",
+        None,
+        "N",
+        false,
+        false,
+        "0..65536; по умолчанию 10000",
+      ),
+      cli.requiredValueOption("max-depth", None, "N", false, false, "0..256; по умолчанию 64"),
+    ],
+    [cli.positional("config", false, false, "JSON-конфигурация")],
+    cli.defaultLimits(),
+  ) {
+    Ok(value) => value,
+    Err(error) => {
+      return fail("marimay-project-check", cli.message(error), 2);
+    },
+  };
+  const parsed = match cli.parse(parser, arguments) {
+    Ok(value) => value,
+    Err(error) => {
+      return fail("marimay-project-check", cli.message(error), 2);
+    },
+  };
+  if cli.count(parsed, "help") != 0 {
+    const help = match cli.help(parser, 80) {
+      Ok(value) => value,
+      Err(error) => {
+        return fail("marimay-project-check", cli.message(error), 2);
+      },
+    };
+    return match emit(help) {
+      Ok(_) => match flush() {
+        Ok(_) => 0,
+        Err(error) => fail("marimay-project-check", error, 2),
+      },
+      Err(error) => fail("marimay-project-check", error, 2),
+    };
+  }
+  const positions = cli.positionalValues(parsed, "config");
+  if positions.length() != 1 {
+    return fail("marimay-project-check", "Нужна JSON-конфигурация; см. --help", 2);
+  }
+  return match execute(parsed, positions[0]) {
+    Ok(status) => status,
+    Err(error) => fail("marimay-project-check", error, 2),
+  };
+}

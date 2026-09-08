@@ -1,0 +1,82 @@
+import * as bytes from "std/bytes";
+import * as json from "std/json";
+
+import * as config from "local/marimay-project-check/config";
+import * as tree from "local/marimay-project-check/tree";
+
+fn configuration(): config.Configuration {
+  return config.Configuration {
+    version: 2,
+    project: config.Project { name: "тест", root: "." },
+    scan: config.Scan {
+      extensions: [".my"],
+      maxFileBytes: 3,
+      requiredFiles: ["missing.my", "dir"],
+    },
+  };
+}
+
+@test
+fn allApplicableFindingsAndStableOrder(): void {
+  const report = match inspect(
+    configuration(),
+    tree.Scan {
+      entries: [
+        tree.Entry { path: "a.txt", kind: "file", size: 4 },
+        tree.Entry { path: "dir", kind: "directory", size: 0 },
+        tree.Entry { path: "link", kind: "symlink", size: 0 },
+      ],
+      issues: [],
+    },
+  ) {
+    Ok(value) => value,
+    Err(error) => panic(error),
+  };
+  expect.equal(report.ok, false);
+  expect.equal(report.findings.length(), 5);
+  expect.equal(report.findings[0].code, "extension");
+  expect.equal(report.findings[1].code, "size");
+  expect.equal(report.findings[2].code, "kind");
+  expect.equal(report.findings[3].code, "missing");
+  expect.equal(report.findings[4].code, "required-kind");
+}
+
+@test
+fn partialTraversalDoesNotInventMissingFiles(): void {
+  const report = match inspect(
+    configuration(),
+    tree.Scan { entries: [], issues: [tree.Issue { path: "dir", message: "denied" }] },
+  ) {
+    Ok(value) => value,
+    Err(error) => panic(error),
+  };
+  expect.equal(report.findings[0].code, "read");
+  expect.equal(report.findings[1].code, "unverified");
+  expect.equal(report.findings[2].code, "unverified");
+}
+
+@test
+fn extensionsAreExactAndEmptyMeansUnrestricted(): void {
+  expect.equal(extensionAllowed("a.my", [".my"]), true);
+  expect.equal(extensionAllowed("a.MY", [".my"]), false);
+  expect.equal(extensionAllowed("dir.my/a", [".my"]), false);
+  expect.equal(extensionAllowed("any", []), true);
+}
+
+@test
+fn sharedConfigurationReadsBothVersions(): void {
+  const old = bytes.encodeUtf8(
+    "{\"version\":1,\"name\":\"тест\",\"root\":\".\",\"extensions\":[\".my\"],\"maxFileBytes\":3}",
+  );
+  const value = match config.decode(old, json.defaultLimits()) {
+    Ok(value) => value,
+    Err(error) => panic(config.message(error)),
+  };
+  expect.equal(value.version, 2);
+  expect.equal(value.scan.requiredFiles.length(), 0);
+  const encoded = match config.encode(configuration(), json.defaultLimits()) {
+    Ok(value) => value,
+    Err(error) => panic(config.message(error)),
+  };
+  expect.ok(config.decode(encoded, json.defaultLimits()));
+}

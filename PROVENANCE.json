@@ -1,0 +1,22 @@
+{
+  "acceptance_driver": {
+    "version": "1",
+    "sha256": "e7db6d3bcb596fd8d36a8af14068e83ed928a1c48f67211dfcd2c998a5e546ce"
+  },
+  "packages": {
+    "tree": {
+      "family_version": "file-wave-1",
+      "sha256": "490890cbbf577b8fe402d7b7fd0f65a583fa4124fb9cbaf54d61b89faec4337a",
+      "shared_with": [
+        "marimay-manifest",
+        "marimay-project-check"
+      ],
+      "responsibility": "bounded iterative directory traversal, explicit issues, UTF-8 path sort"
+    },
+    "config": {
+      "origin": "../marimay-config/config/model.my",
+      "sha256": "c1dd4289a572788676096adab1d26f2478a87680d39937953b1121b96bb10a3c",
+      "note": "Copied without edits from the existing working configuration owner; its repository was not committed or changed."
+    }
+  }
+}

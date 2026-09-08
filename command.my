@@ -1,0 +1,41 @@
+import * as cli from "std/cli";
+import * as convert from "std/convert";
+import * as io from "std/io";
+
+fn fail(program: string, message: string, status: int): int {
+  const _ = io.eprintln($"{program}: {message}");
+  const _ = io.flushStderr();
+  return status;
+}
+
+fn emit(value: string): Result<void, string> {
+  return io.println(value).mapError(io.message);
+}
+
+fn flush(): Result<void, string> {
+  return io.flushStdout().mapError(io.message);
+}
+
+fn number(parsed: cli.Parsed, name: string, fallback: int, ceiling: int): Result<int, string> {
+  const values = cli.occurrences(parsed, name);
+  if values.length() == 0 {
+    return Ok(fallback);
+  }
+  const spelling = match values[0] {
+    Some(value) => value,
+    None => "",
+  };
+  const value = convert.parseInt(spelling).mapError((error) => $"--{name}: ожидается целое число")?;
+  if value < 0 || value > ceiling {
+    return Err($"--{name}: допустимо 0..{ceiling}");
+  }
+  return Ok(value);
+}
+
+fn option(parsed: cli.Parsed, name: string): Option<string> {
+  const values = cli.occurrences(parsed, name);
+  if values.length() == 0 {
+    return None;
+  }
+  return values[0];
+}

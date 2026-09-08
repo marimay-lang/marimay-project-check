@@ -1,0 +1,186 @@
+import * as bytes from "std/bytes";
+import * as fs from "std/fs";
+import * as path from "std/path";
+import * as text from "std/text";
+
+public type Entry {
+  public path: string,
+  public kind: string,
+  public size: int,
+}
+
+public type Issue {
+  public path: string,
+  public message: string,
+}
+
+public type Scan {
+  public entries: []Entry,
+  public issues: []Issue,
+}
+
+type Pending {
+  public relative: string,
+  public depth: int,
+}
+
+public fn relative(value: string): Result<string, string> {
+  const parsed = path.fromString(value).mapError((error) => "Недопустимый относительный путь")?;
+  const normalized = path.string(parsed);
+  if path.isAbsolute(parsed)
+    || normalized == "."
+    || normalized == ".."
+    || text.startsWith(normalized, "../")
+    || normalized != value {
+    return Err("Нужен нормализованный непустой путь внутри корня");
+  }
+  return Ok(normalized);
+}
+
+type Key {
+  public entry: Entry,
+  public bytes: bytes.Bytes,
+}
+
+fn before(left: bytes.Bytes, right: bytes.Bytes): bool {
+  let index = 0;
+  while index < bytes.length(left) && index < bytes.length(right) {
+    const a = bytes.get(left, index);
+    const b = bytes.get(right, index);
+    if a != b {
+      return a < b;
+    }
+    index += 1;
+  }
+  return bytes.length(left) <= bytes.length(right);
+}
+
+// Encode each path once; comparisons allocate no temporary strings or buffers.
+// Bottom-up merge sort: O(n log n), independent outer buffer, same entry identities.
+public fn sort(entries: []Entry): Result<void, string> {
+  const keys: []Key = [];
+  for entry in entries {
+    keys.push(Key { entry, bytes: bytes.encodeUtf8(entry.path) }).mapError(
+      (error) => "Слишком много ключей сортировки",
+    )?;
+  }
+  const scratch = keys.copy();
+  let width = 1;
+  while width < entries.length() {
+    let start = 0;
+    while start < entries.length() {
+      let middle = start + width;
+      if middle > entries.length() {
+        middle = entries.length();
+      }
+      let end = middle + width;
+      if end > entries.length() {
+        end = entries.length();
+      }
+      let left = start;
+      let right = middle;
+      let output = start;
+      while output < end {
+        if left < middle && (right >= end || before(keys[left].bytes, keys[right].bytes)) {
+          scratch[output] = keys[left];
+          left += 1;
+        } else {
+          scratch[output] = keys[right];
+          right += 1;
+        }
+        output += 1;
+      }
+      start = end;
+    }
+    for index in 0..entries.length() {
+      keys[index] = scratch[index];
+    }
+    width *= 2;
+  }
+  for index in 0..entries.length() {
+    entries[index] = keys[index].entry;
+  }
+  return Ok();
+}
+
+public fn walk(root: path.Path, limit: int, depthLimit: int): Result<Scan, string> {
+  if limit < 0 || limit > 65536 || depthLimit < 0 || depthLimit > 256 {
+    return Err("Недопустимые границы обхода");
+  }
+  const rootInfo = fs.metadata(root).mapError(fs.message)?;
+  if rootInfo.kind != fs.Kind.Directory {
+    return Err("Корень должен быть каталогом");
+  }
+  const entries: []Entry = [];
+  const issues: []Issue = [];
+  const pending = [Pending { relative: "", depth: 0 }];
+  while const directory = pending.pop() {
+    const location = path.join(
+      root,
+      path.fromString(directory.relative).mapError((error) => "Недопустимый путь каталога")?,
+    ).mapError((error) => "Путь каталога выходит за допустимые границы")?;
+    const children = match fs.readDirectory(location, limit - entries.length()) {
+      Ok(value) => value,
+      Err(fs.TooManyEntries { limit: _ }) => {
+        return Err($"Превышен лимит {limit} записей дерева");
+      },
+      Err(error) => {
+        issues.push(Issue { path: directory.relative, message: fs.message(error) }).mapError(
+          (error) => "Слишком много ошибок обхода",
+        )?;
+        continue;
+      },
+    };
+    for child in children {
+      const name = match directory.relative == "" {
+        true => child.name,
+        false => $"{directory.relative}/{child.name}",
+      };
+      const childPath = path.join(
+        root,
+        path.fromString(name).mapError((error) => "Недопустимое имя в дереве")?,
+      ).mapError((error) => "Путь дерева выходит за допустимые границы")?;
+      let kind = "other";
+      let size = 0;
+      match child.kind {
+        fs.EntryKind.Symlink => {
+          kind = "symlink";
+        },
+        fs.EntryKind.Other => {},
+        fs.EntryKind.File => {
+          kind = "file";
+          match fs.metadata(childPath) {
+            Ok(info) => {
+              if info.kind == fs.Kind.File {
+                size = info.size;
+              } else {
+                issues.push(
+                  Issue { path: name, message: "Тип записи изменился при обходе" },
+                ).mapError((error) => "Слишком много ошибок обхода")?;
+              }
+            },
+            Err(error) => {
+              issues.push(Issue { path: name, message: fs.message(error) }).mapError(
+                (error) => "Слишком много ошибок обхода",
+              )?;
+            },
+          };
+        },
+        fs.EntryKind.Directory => {
+          kind = "directory";
+          if directory.depth >= depthLimit {
+            return Err($"Превышена глубина {depthLimit} каталогов");
+          }
+          pending.push(Pending { relative: name, depth: directory.depth + 1 }).mapError(
+            (error) => "Слишком много каталогов",
+          )?;
+        },
+      };
+      entries.push(Entry { path: name, kind, size }).mapError(
+        (error) => "Слишком много записей дерева",
+      )?;
+    }
+  }
+  sort(entries)?;
+  return Ok(Scan { entries, issues });
+}

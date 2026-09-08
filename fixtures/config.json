@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "project": {
+    "name": "Пример",
+    "root": "fixtures/tree"
+  },
+  "scan": {
+    "extensions": [
+      ".txt"
+    ],
+    "maxFileBytes": 1024,
+    "requiredFiles": [
+      "readme.txt",
+      "папка/строка.txt"
+    ]
+  }
+}
