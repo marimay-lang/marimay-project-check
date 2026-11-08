@@ -1,17 +1,18 @@
-# Локальная проверка — 2026-09-08
+# Historical local verification — 2026-09-08
 
-macOS arm64, компилятор с родительским commit `94d1e85` и исправлением D092
-именованных void-шаблонов. Хешы исходников/компилятора/движков и точные команды
-сохранены в отчётах и в evidence языка `cp42-files-context-2026-09-08.json`.
+This translates the original record; it does not report a new run. Host:
+macOS arm64; compiler based on parent commit `94d1e85` with the D092 named-void
+pattern fix. Source/compiler/engine hashes and exact commands are in the
+reports and language evidence `cp42-files-context-2026-09-08.json`.
 
 - Source tests: **4**, `mmay test . --engine both`.
-- Process scenarios: **31**, точные stdout/stderr/status VM/native Debug/Release;
-  отдельные denied cases используют VM и native Release.
-- Closed stdout: **3**; write/flush возвращают типизированный отказ.
-- Приёмка: `python3 tools/acceptance.py`, отчёт `build/acceptance/report.json`.
-- Измерения: `python3 tools/measure.py`, указатель `build/latest-measurement.txt`.
+- Process scenarios: **31**, exact stdout/stderr/status in VM/native
+  Debug/Release; separate denied cases use VM and native Release.
+- Closed stdout: **3**, with typed write/flush failures.
+- Acceptance: `python3 tools/acceptance.py`, `build/acceptance/report.json`.
+- Measurement: `python3 tools/measure.py`, `build/latest-measurement.txt`.
 
-| Нагрузка | Движок | Первый образец, мс | Медиана остальных*, мс | Max RSS, МиБ |
+| Workload | Engine | First sample, ms | Remaining median*, ms | Max RSS, MiB |
 |---|---|---:|---:|---:|
 | 1-files | native | 391.37 | 9.04 | 2.20 |
 | 1-files | vm | 452.07 | 440.12 | 29.00 |
@@ -20,13 +21,14 @@ macOS arm64, компилятор с родительским commit `94d1e85` �
 | 10000-files | native | 237.87 | 237.87 | 41.19 |
 | 10000-files | vm | 2003.49 | 2003.49 | 70.98 |
 
-*Если образец один, показан он же. Для 1000 файлов и 100 env/100 paths есть три
-повтора; для 10000 файлов — один. Все сырые значения есть в JSON. Таблица
-не устанавливает доверительный интервал или стабильную межплатформенную базу.
-Повторный source-test both: 787.08 мс при бюджете 2000 мс.
+*When only one sample exists, it is shown in both columns. The 1000-file and
+100-env/100-path workloads have three repetitions; the 10000-file workload has
+one. JSON retains all raw samples. This table does not establish confidence
+intervals or a stable cross-platform baseline. Repeated source-test both:
+787.08 ms against a 2000 ms budget.
 
-Бюджеты больших нагрузок и RSS выполнены локально. **Первый native-запуск
-провалил 100 мс**. Последующие малые запуски проходят; бюджет не ослаблен.
-Процессы измерялись последовательно после проверок, при обычных фоновых
-приложениях. Нет заявления об очищенном дисковом кэше, свежей машине или
-проверенном системном объяснении задержки. Полная приёмка CP42 ещё открыта.
+Large-workload and RSS budgets passed locally. **First native execution missed
+100 ms**; subsequent small runs passed, without relaxing the budget. Processes
+were measured sequentially after verification with ordinary background apps.
+No cleared disk cache, fresh host or proven system-level explanation of the
+startup delay was claimed. Full CP42 acceptance remained open.

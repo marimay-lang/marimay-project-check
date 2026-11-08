@@ -1,63 +1,49 @@
 # marimay-project-check
 
-Проверяет файлы проекта по типизированному конфигу `marimay-config` v1/v2:
-разрешённые расширения, максимальный размер, обязательные обычные файлы.
-Пакет `config` — зафиксированная копия существующего валидатора; `tree` —
-тот же пакет обхода, который используется `marimay-manifest`. Самостоятельная
-сборка не требует соседних репозиториев. Происхождение записано в `PROVENANCE.json`.
+![Project policy checks — a Marimay learning project](.github/banner.svg)
+
+> **Personal learning project.** This open-source MIT project is part of
+> [Marimay](https://github.com/marimay-lang/marimay), my hobby programming-language project.
+> I maintain it in my spare time to learn by building. APIs and tooling may
+> change, and progress may be intermittent.
+
+Checks extensions, maximum file sizes and required regular files using the version 1 or 2 configuration from `marimay-config`.
+
+**Status:** Experimental Marimay learning application. Process acceptance scripts exercise
+VM and native Debug/Release execution. Full platform and performance acceptance
+remain in progress; existing reports retain their recorded revisions and limits.
+
+## Run and verify
 
 ```sh
-mmay run . --allow-read fixtures -- fixtures/config.json
+mmay run . -- --help
 mmay run . --allow-read fixtures -- fixtures/config.json --json
-mkdir -p build
-mmay build . --release --allow-read fixtures --output build/project-check
-./build/project-check fixtures/config.json --json
-```
-
-Относительный `project.root` считается от рабочего каталога запуска.
-`requiredFiles` должны быть нормализованными относительными путями внутри
-корня. Сравнение расширений регистрозависимое; пустой список разрешает любые,
-иначе подходит хотя бы один указанный суффикс. Файл может получить одновременно
-замечания `extension` и `size`. Каталоги не проверяются на расширение или размер.
-Ссылка/специальная запись получает `kind`; обязательная запись такого типа
-или каталог — `required-kind`.
-
-Обход собирает доступные записи и ошибки чтения подкаталогов. После ошибок
-чтения идут замечания к записям в порядке UTF-8 путей, затем обязательные файлы
-в порядке конфигурации. Неполный обход даёт `unverified` вместо недоказанного
-`missing`. Ссылки не обходятся. Нет скрытых исключений каталогов и атомарного
-снимка изменяющегося дерева. Для согласованного результата остановите его изменение.
-
-`--json` выводит объект `project`, `ok`, `findings`; замечание содержит `path`,
-`code`, `message`. Обычный режим выводит `путь: код: сообщение`, при успехе —
-`имя: OK`. Файлы и конфигурация никогда не изменяются.
-
-Коды: **0** — замечаний нет, **1** — собраны замечания, **2** — неверные
-аргументы/конфиг, недоступный корень, превышенный глобальный лимит или ошибка
-вывода. До построения полного отчёта stdout пуст. Ошибки подготовки идут в stderr.
-`--max-entries`: 0..65536, по умолчанию 10000; `--max-depth`: 0..256,
-по умолчанию 64 (корень 0). Глобальный лимит прерывает обработку с кодом 2,
-не маскируется частичным отчётом. Входной JSON и JSON-отчёт ограничены 1 МиБ.
-
-## Проверка
-
-```sh
-mmay fmt --check .
+mmay fmt . --check
 mmay check .
 mmay test . --engine both
-python3 tools/acceptance.py
-python3 tools/measure.py
+MMAY="$(command -v mmay)" python3 tools/acceptance.py
+mkdir -p build
+mmay build . --release --allow-read fixtures --output build/project-check
 ```
 
-`MMAY=/полный/путь/mmay` выбирает компилятор для Python-драйверов. Они управляют
-процессами и независимыми оракулами; вся прикладная логика написана на Marimay.
-Отчёты лежат в `build/`. Синтетические деревья создаются вне модуля в соседних
-`.acceptance-data/` и `.measure-data/`, чтобы `.my` внутри проверяемых данных
-не участвовали в обнаружении исходников самого приложения.
+Install a compatible `mmay` and use its matching standard library. Application
+arguments follow `--` in `mmay run`. Filesystem and environment access requires
+explicit grants; native grants are selected at build time.
 
-Коды выхода и байты stdout/stderr проверяются в VM, native Debug и Release.
-Проверка включает отрицательные случаи, Unicode, ограничения, denied I/O и
-закрытый stdout. На POSIX также проверяются ссылки; на Windows эти сценарии
-нуждаются в собственном подтверждении. `BUDGETS.md` содержит бюджеты,
-`ERGONOMICS.md` — ограничения и найденные пробелы. Локальная реализация ещё
-не означает полную платформенную приёмку CLI0.
+Pinned configuration and traversal packages are included for independent builds;
+`PROVENANCE.json` records their origin. `project.root` is relative to the working
+directory. Reports include accessible entries and traversal errors; incomplete
+scans use `unverified` where absence cannot be established. Symlinks are not
+followed. Entry, depth and JSON-size limits are explicit.
+
+Python generates synthetic inputs and drives independent process checks;
+application logic is written in Marimay. `MMAY=/absolute/path/to/mmay` selects
+the compiler for Python drivers. `python3 tools/measure.py` runs the existing
+measurement harness and writes local reports under `build/`.
+
+See [`BUDGETS.md`](BUDGETS.md), [`ERGONOMICS.md`](ERGONOMICS.md), [`VERIFICATION.md`](VERIFICATION.md) for project-specific budgets,
+findings and historical verification details.
+
+## License
+
+[MIT](LICENSE). Existing copyright attribution is retained.
